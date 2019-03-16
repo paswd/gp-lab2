@@ -321,7 +321,7 @@ __host__ void FileGeneratorBig(uint32_t height, uint32_t width, string filename)
 }
 
 __host__ int main(void) {
-	FileGeneratorBig(128, 128, "inbig.data");
+	FileGeneratorBig(10000, 5000, "inbig.data");
 	string file_in, file_out;
 	uint32_t radius;
 
