@@ -3,7 +3,7 @@
 #include <string>
 #include <cstdio>
 #include <cstdlib>
-#include "../lib/cuPrintf.cu"
+//#include "../lib/cuPrintf.cu"
 
 using namespace std;
 
@@ -45,7 +45,7 @@ __device__ double GetIntensity(Pixel pixel) {
 }
 
 __device__ bool IsCorrectPos(Position pos, uint32_t height, uint32_t width) {
-	if (pos.X >= 0 && pos.Y >= 0 && pos.X < (int32_t) height && pos.Y < (int32_t) width) {
+	if (pos.X >= 0 && pos.Y >= 0 && pos.X < (int32_t) width && pos.Y < (int32_t) height) {
 		return true;
 	}
 	return false;
@@ -75,6 +75,27 @@ __device__ int32_t GetLinearizedPosition(Position pos, uint32_t height, uint32_t
 	return pos.Y * width + pos.X;
 }
 
+__device__ uint8_t GetMedianElementFromCountArray(uint32_t *arr, uint32_t size) {
+	uint32_t tmp_cnt = 0;
+	bool is_break = false;
+	uint8_t res = 0;
+	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
+		for (uint32_t j = 0; j < arr[i]; j++) {
+			if (tmp_cnt == size / 2) {
+				res = (uint8_t) i;
+				is_break = true;
+				break;
+			}
+			tmp_cnt++;
+		}
+		if (is_break) {
+			break;
+		}
+	}
+
+	return res;
+}
+
 __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, Position start, Position end) {
 	uint32_t count_array_red[COUNTING_SORT_BASE];
 	uint32_t count_array_green[COUNTING_SORT_BASE];
@@ -88,12 +109,15 @@ __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, 
 	Position curr_pos;
 
 	uint32_t size = 0;
+	//cuPrintf("\nStart: [%d:%d]\nEnd: [%d:%d]\n\n", start.X, start.Y, end.X, end.Y);
 
 	for (curr_pos.X = start.X; curr_pos.X <= end.X; curr_pos.X++) {
 		for (curr_pos.Y = start.Y; curr_pos.Y <= end.Y; curr_pos.Y++) {
 			if (!IsCorrectPos(curr_pos, height, width)) {
+				//cuPrintf(" [%d:%d] - INCORRECT\n", curr_pos.X, curr_pos.Y);
 				continue;
 			}
+			//cuPrintf(" [%d:%d] - CORRECT\n", curr_pos.X, curr_pos.Y);
 			count_array_red[map_in[GetLinearizedPosition(curr_pos, height, width)].Red]++;
 			count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
 			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;
@@ -102,8 +126,10 @@ __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, 
 		}
 	}
 
+	//cuPrintf(" %d-%d-%d-%d-%d\n", count_array_red[0], count_array_red[1], count_array_red[2], count_array_red[3], count_array_red[4]);
+
 	Pixel res;
-	uint32_t tmp_cnt = 0;
+	/*uint32_t tmp_cnt = 0;
 	bool is_break = false;
 	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
 		for (uint32_t j = 0; j < count_array_red[i]; j++) {
@@ -147,24 +173,25 @@ __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, 
 		if (is_break) {
 			break;
 		}
-	}
+	}*/
+	res.Red = GetMedianElementFromCountArray(count_array_red, size);
+	res.Green = GetMedianElementFromCountArray(count_array_green, size);
+	res.Blue = GetMedianElementFromCountArray(count_array_blue, size);
 	res.Alpha = 0;
+	//cuPrintf("\n%d-%d-%d-%d\n", (int32_t) res.Red, (int32_t) res.Green, (int32_t) res.Blue, (int32_t) res.Alpha);
 	return res;
 }
 
 __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint32_t width,
 		Pixel *map_in, Pixel *map_out) {
 	Position start, end;
-	start.X = pos.X - (int32_t) radius;
-	start.Y = pos.Y - (int32_t) radius;
-	end.X = pos.X + (int32_t) radius;
-	end.Y = pos.Y + (int32_t) radius;
+	start.X = max(pos.X - (int32_t) radius, 0);
+	start.Y = max(pos.Y - (int32_t) radius, 0);
+	end.X = min(pos.X + (int32_t) radius, width - 1);
+	end.Y = min(pos.Y + (int32_t) radius, height - 1);
 
 
 	int32_t pos_linear = GetLinearizedPosition(pos, height, width);
-	/*map_out[pos_linear].Red = map_in[pos_linear].Red;
-	map_out[pos_linear].Green = map_in[pos_linear].Green;
-	map_out[pos_linear].Blue = map_in[pos_linear].Blue;*/
 	map_out[pos_linear] = GetMedianValue(map_in, height, width, start, end);
 }
 
@@ -176,26 +203,23 @@ GLOBAL
 
 __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
 		Pixel *map_in, Pixel *map_out) {
-	/*Position begin, offset;
-	begin.X = (int32_t) (blockDim.x * blockIdx.x + threadIdx.x);
-	offset.X = (int32_t) (gridDim.x * blockDim.x);
-	begin.Y = (int32_t) (blockDim.y * blockIdx.y + threadIdx.y);
-	offset.Y = (int32_t) (gridDim.y * blockDim.y);*/
 
-	Position pos;
-	pos.X = blockIdx.x * blockDim.x + threadIdx.x;
-	pos.Y = blockIdx.y * blockDim.y + threadIdx.y;
-	//cuPrintf("TEST2\n");
+	Position start, offset;
+	start.X = blockIdx.x * blockDim.x + threadIdx.x;
+	start.Y = blockIdx.y * blockDim.y + threadIdx.y;
 
-	/*for (pos.X = begin.X; pos.X < height; pos.X += offset.X) {
-		for (pos.Y = begin.Y; pos.Y < width; pos.Y += offset.Y) {
-			GetNewPixel(pos, radius, height, width, map_in, map_out);
-		}
-	}*/
+	offset.X = gridDim.x * blockDim.x;
+	offset.Y = gridDim.y * blockDim.y;
 
 	//cuPrintf("\n%d:%d\n%d:%d\n======\n", pos.X, pos.Y, height, width);
-	if (pos.X < width && pos.Y < height) {
-		GetNewPixel(pos, radius, height, width, map_in, map_out);
+	Position pos;
+	for (pos.X = start.X; pos.X < width; pos.X += offset.X) {
+		for (pos.Y = start.Y; pos.Y < height; pos.Y += offset.Y) {
+			if (pos.X < width && pos.Y < height) {
+				//cuPrintf("\n%d:%d\n", pos.X, pos.Y);
+				GetNewPixel(pos, radius, height, width, map_in, map_out);
+			}
+		}
 	}
 	//cuPrintf("Hello world from CUDA\n");
 }
@@ -232,15 +256,9 @@ __host__ void WritePixelToFile(Pixel *pixel, FILE *file) {
 
 __host__ void InitPixelMap(Pixel **pixel, uint32_t height, uint32_t width) {
 	*pixel = new Pixel[height * width];
-	/*for (uint32_t i = 0; i < height; i++) {
-		(*pixel)[i] = new Pixel[width];
-	}*/
 }
 
 __host__ void DestroyPixelMap(Pixel **pixel) {
-	/*for (uint32_t i = 0; i < height; i++) {
-		delete [] (*pixel)[i];
-	}*/
 	delete [] (*pixel);
 	*pixel = NULL;
 }	
@@ -251,11 +269,7 @@ __host__ void ReadImageFromFile(Pixel **pixel, uint32_t *height, uint32_t *width
 	fread(height, sizeof(uint32_t), 1, file);
 
 	InitPixelMap(pixel, *height, *width);
-	/*for (uint32_t i = 0; i < *height; i++) {
-		for (uint32_t j = 0; j < *width; j++) {
-			ReadPixelFromFile(&((*pixel)[i][j]), file);
-		}
-	}*/
+
 	for (uint32_t i = 0; i < (*height) * (*width); i++) {
 		ReadPixelFromFile(&((*pixel)[i]), file);
 	}
@@ -267,11 +281,6 @@ __host__ void WriteImageToFile(Pixel *pixel, uint32_t height, uint32_t width, st
 	fwrite(&width, sizeof(uint32_t), 1, file);
 	fwrite(&height, sizeof(uint32_t), 1, file);
 
-	/*for (uint32_t i = 0; i < height; i++) {
-		for (uint32_t j = 0; j < width; j++) {
-			WritePixelToFile(&(pixel)[i][j], file);
-		}
-	}*/
 	for (uint32_t i = 0; i < height * width; i++) {
 		WritePixelToFile(&(pixel)[i], file);
 	}
@@ -321,7 +330,7 @@ __host__ void FileGeneratorBig(uint32_t height, uint32_t width, string filename)
 }
 
 __host__ int main(void) {
-	FileGeneratorBig(10000, 5000, "inbig.data");
+	//FileGeneratorBig(5, 3, "inbig.data");
 	string file_in, file_out;
 	uint32_t radius;
 
@@ -358,13 +367,13 @@ __host__ int main(void) {
 		blocks_per_grid.y = ceil((double) (height) / (double)(threads_per_block.y));
 	}
 
-	cout << threads_per_block.x << " " << threads_per_block.y << endl;
-	cout << blocks_per_grid.x << " " << blocks_per_grid.y << endl;
+	//cout << threads_per_block.x << " " << threads_per_block.y << endl;
+	//cout << blocks_per_grid.x << " " << blocks_per_grid.y << endl;
 
 	//cudaPrintfInit();
 	MedianFilter<<<blocks_per_grid, threads_per_block>>>(radius, height, width, cuda_pixel_in, cuda_pixel_out);
 
-	cout << cudaGetErrorString(cudaGetLastError()) << endl;
+	//cout << cudaGetErrorString(cudaGetLastError()) << endl;
 
 
 	//cudaPrintfDisplay(stdout, true);
