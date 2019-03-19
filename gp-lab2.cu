@@ -16,18 +16,26 @@ CONSTANTS
 const uint32_t COUNTING_SORT_BASE = 256;
 const uint32_t BLOCK_DIM = 32;
 
+namespace Pixel {
+	//const uint32_t ELEMENTS_CNT = 4;
+	const uint32_t RED = 8 * 0;
+	const uint32_t GREEN = 8 * 1;
+	const uint32_t BLUE = 8 * 2;
+	const uint32_t ALPHA = 8 * 3;
+}
+
 /*
 ==========
 STRUCTURES
 ==========
 */
 
-struct Pixel {
+/*struct Pixel {
 	uint8_t Red;
 	uint8_t Green;
 	uint8_t Blue;
 	uint8_t Alpha;
-};
+};*/
 
 struct Position {
 	int32_t X;
@@ -40,9 +48,9 @@ DEVICE
 ======
 */
 
-__device__ double GetIntensity(Pixel pixel) {
+/*__device__ double GetIntensity(Pixel pixel) {
 	return (.3 * (double) pixel.Red) + (.59 * (double) pixel.Green) + (.11 * (double) pixel.Blue);
-}
+}*/
 
 __device__ bool IsCorrectPos(Position pos, uint32_t height, uint32_t width) {
 	if (pos.X >= 0 && pos.Y >= 0 && pos.X < (int32_t) width && pos.Y < (int32_t) height) {
@@ -50,23 +58,6 @@ __device__ bool IsCorrectPos(Position pos, uint32_t height, uint32_t width) {
 	}
 	return false;
 }
-
-/*__device__ void CountingSort(uint8_t *array, uint32_t size) {
-	uint32_t count_array[COUNTING_SORT_BASE];
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		count_array[i] = 0;
-	}
-	for (uint32_t i = 0; i < size; i++) {
-		count_array[array[i]]++;
-	}
-	uint32_t current = 0;
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		for (uint32_t j = 0; j < count_array[i]; j++) {
-			array[current] = i;
-			current++;
-		}
-	}
-}*/
 
 __device__ int32_t GetLinearizedPosition(Position pos, uint32_t height, uint32_t width) {
 	if (!IsCorrectPos(pos, height, width)) {
@@ -77,18 +68,11 @@ __device__ int32_t GetLinearizedPosition(Position pos, uint32_t height, uint32_t
 
 __device__ uint8_t GetMedianElementFromCountArray(uint32_t *arr, uint32_t size) {
 	uint32_t tmp_cnt = 0;
-	bool is_break = false;
 	uint8_t res = 0;
 	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		for (uint32_t j = 0; j < arr[i]; j++) {
-			if (tmp_cnt == size / 2) {
-				res = (uint8_t) i;
-				is_break = true;
-				break;
-			}
-			tmp_cnt++;
-		}
-		if (is_break) {
+		tmp_cnt += arr[i];
+		if (tmp_cnt > size / 2) {
+			res = (uint8_t) i;
 			break;
 		}
 	}
@@ -96,7 +80,16 @@ __device__ uint8_t GetMedianElementFromCountArray(uint32_t *arr, uint32_t size) 
 	return res;
 }
 
-__device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, Position start, Position end) {
+__device__ uint32_t MakePixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha) {
+	return ((uint32_t) red << Pixel::RED) + ((uint32_t) green << Pixel::GREEN) +
+			((uint32_t) blue << Pixel::BLUE) + ((uint32_t) alpha << Pixel::ALPHA);
+}
+
+__device__ uint8_t GetPixelElement(uint32_t pixel, uint32_t element) {
+	return (pixel >> element) & 255;
+}
+
+__device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t width, Position start, Position end) {
 	uint32_t count_array_red[COUNTING_SORT_BASE];
 	uint32_t count_array_green[COUNTING_SORT_BASE];
 	uint32_t count_array_blue[COUNTING_SORT_BASE];
@@ -118,9 +111,11 @@ __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, 
 				continue;
 			}
 			//cuPrintf(" [%d:%d] - CORRECT\n", curr_pos.X, curr_pos.Y);
-			count_array_red[map_in[GetLinearizedPosition(curr_pos, height, width)].Red]++;
-			count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
-			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;
+			count_array_red[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::RED)]++;
+			count_array_green[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::GREEN)]++;
+			count_array_blue[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::BLUE)]++;
+			/*count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
+			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;*/
 
 			size++;
 		}
@@ -128,62 +123,16 @@ __device__ Pixel GetMedianValue(Pixel *map_in, uint32_t height, uint32_t width, 
 
 	//cuPrintf(" %d-%d-%d-%d-%d\n", count_array_red[0], count_array_red[1], count_array_red[2], count_array_red[3], count_array_red[4]);
 
-	Pixel res;
-	/*uint32_t tmp_cnt = 0;
-	bool is_break = false;
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		for (uint32_t j = 0; j < count_array_red[i]; j++) {
-			if (tmp_cnt == size / 2) {
-				res.Red = i;
-				is_break = true;
-				break;
-			}
-			tmp_cnt++;
-		}
-		if (is_break) {
-			break;
-		}
-	}
-	tmp_cnt = 0;
-	is_break = false;
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		for (uint32_t j = 0; j < count_array_green[i]; j++) {
-			if (tmp_cnt == size / 2) {
-				res.Green = i;
-				is_break = true;
-				break;
-			}
-			tmp_cnt++;
-		}
-		if (is_break) {
-			break;
-		}
-	}
-	tmp_cnt = 0;
-	is_break = false;
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
-		for (uint32_t j = 0; j < count_array_blue[i]; j++) {
-			if (tmp_cnt == size / 2) {
-				res.Blue = i;
-				is_break = true;
-				break;
-			}
-			tmp_cnt++;
-		}
-		if (is_break) {
-			break;
-		}
-	}*/
-	res.Red = GetMedianElementFromCountArray(count_array_red, size);
-	res.Green = GetMedianElementFromCountArray(count_array_green, size);
-	res.Blue = GetMedianElementFromCountArray(count_array_blue, size);
-	res.Alpha = 0;
+	
+	uint32_t res = MakePixel(GetMedianElementFromCountArray(count_array_red, size),
+		GetMedianElementFromCountArray(count_array_green, size),
+		GetMedianElementFromCountArray(count_array_blue, size), 0);
 	//cuPrintf("\n%d-%d-%d-%d\n", (int32_t) res.Red, (int32_t) res.Green, (int32_t) res.Blue, (int32_t) res.Alpha);
 	return res;
 }
 
 __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint32_t width,
-		Pixel *map_in, Pixel *map_out) {
+		uint32_t *map_in, uint32_t *map_out) {
 	Position start, end;
 	start.X = max(pos.X - (int32_t) radius, 0);
 	start.Y = max(pos.Y - (int32_t) radius, 0);
@@ -202,7 +151,7 @@ GLOBAL
 */
 
 __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
-		Pixel *map_in, Pixel *map_out) {
+		uint32_t *map_in, uint32_t *map_out) {
 
 	Position start, offset;
 	start.X = blockIdx.x * blockDim.x + threadIdx.x;
@@ -230,65 +179,44 @@ HOST
 ====
 */
 
-__host__ Pixel SetPixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha) {
-	Pixel pixel;
-	pixel.Red = red;
-	pixel.Green = green;
-	pixel.Blue = blue;
-	pixel.Alpha = alpha;
-
-	return pixel;
+__host__ uint32_t SetPixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha) {
+	return ((uint32_t) red << Pixel::RED) + ((uint32_t) green << Pixel::GREEN) +
+			((uint32_t) blue << Pixel::BLUE) + ((uint32_t) alpha << Pixel::ALPHA);
 }
 
-__host__ void ReadPixelFromFile(Pixel *pixel, FILE *file) {
-	fread(&(pixel->Red), sizeof(uint8_t), 1, file);
-	fread(&(pixel->Green), sizeof(uint8_t), 1, file);
-	fread(&(pixel->Blue), sizeof(uint8_t), 1, file);
-	fread(&(pixel->Alpha), sizeof(uint8_t), 1, file);
+__host__ void InitPixelMap(uint32_t **pixel, uint32_t height, uint32_t width) {
+	*pixel = new uint32_t[height * width];
 }
 
-__host__ void WritePixelToFile(Pixel *pixel, FILE *file) {
-	fwrite(&(pixel->Red), sizeof(uint8_t), 1, file);
-	fwrite(&(pixel->Green), sizeof(uint8_t), 1, file);
-	fwrite(&(pixel->Blue), sizeof(uint8_t), 1, file);
-	fwrite(&(pixel->Alpha), sizeof(uint8_t), 1, file);
-}
-
-__host__ void InitPixelMap(Pixel **pixel, uint32_t height, uint32_t width) {
-	*pixel = new Pixel[height * width];
-}
-
-__host__ void DestroyPixelMap(Pixel **pixel) {
+__host__ void DestroyPixelMap(uint32_t **pixel) {
 	delete [] (*pixel);
 	*pixel = NULL;
 }	
 
-__host__ void ReadImageFromFile(Pixel **pixel, uint32_t *height, uint32_t *width, string filename) {
+__host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *width, string filename) {
 	FILE *file = fopen(filename.c_str(), "rb");
 	fread(width, sizeof(uint32_t), 1, file);
 	fread(height, sizeof(uint32_t), 1, file);
 
-	InitPixelMap(pixel, *height, *width);
+	uint32_t size = (*height) * (*width);
 
-	for (uint32_t i = 0; i < (*height) * (*width); i++) {
-		ReadPixelFromFile(&((*pixel)[i]), file);
-	}
+	InitPixelMap(pixel, *height, *width);
+	fread(*pixel, sizeof(uint32_t), size, file);
 	fclose(file);
 }
 
-__host__ void WriteImageToFile(Pixel *pixel, uint32_t height, uint32_t width, string filename) {
+__host__ void WriteImageToFile(uint32_t *pixel, uint32_t height, uint32_t width, string filename) {
 	FILE *file = fopen(filename.c_str(), "wb");
 	fwrite(&width, sizeof(uint32_t), 1, file);
 	fwrite(&height, sizeof(uint32_t), 1, file);
 
-	for (uint32_t i = 0; i < height * width; i++) {
-		WritePixelToFile(&(pixel)[i], file);
-	}
+	uint32_t size = height * width;
+	fwrite(pixel, sizeof(uint32_t), size, file);
 	fclose(file);
 }
 
 __host__ void FileGenerator() {
-	Pixel *pixel;
+	uint32_t *pixel;
 	uint32_t height = 3;
 	uint32_t width = 3;
 	InitPixelMap(&pixel, height, width);
@@ -310,7 +238,7 @@ __host__ void FileGenerator() {
 	DestroyPixelMap(&pixel);
 }
 __host__ void FileGeneratorBig(uint32_t height, uint32_t width, string filename) {
-	Pixel *pixel;
+	uint32_t *pixel;
 	InitPixelMap(&pixel, height, width);
 
 	for (uint32_t i = 0; i < height; i++) {
@@ -336,26 +264,23 @@ __host__ int main(void) {
 
 	cin >> file_in >> file_out >> radius;
 	//FileGenerator();
-	Pixel *pixel_in;
-	Pixel *pixel_out;
+	uint32_t *pixel_in;
+	uint32_t *pixel_out;
 	uint32_t height, width;
 	ReadImageFromFile(&pixel_in, &height, &width, file_in);
-	//WriteImageToFile(pixel, height, width, "out.data");
 
 	InitPixelMap(&pixel_out, height, width);
 
-	Pixel *cuda_pixel_in;
-	Pixel *cuda_pixel_out;
+	uint32_t *cuda_pixel_in;
+	uint32_t *cuda_pixel_out;
 
 	/*size_t pitch;
 	cudaMallocPitch((void**) &cuda_pixel_in, &pitch, width * sizeof(Pixel), height);
 	cudaMallocPitch((void**) &cuda_pixel_out, &pitch, width * sizeof(Pixel), height);*/
-	cudaMalloc((void**) &cuda_pixel_in, sizeof(Pixel) * width * height);
-	cudaMalloc((void**) &cuda_pixel_out, sizeof(Pixel) * width * height);
-	cudaMemcpy(cuda_pixel_in, pixel_in, sizeof(Pixel) * width * height, cudaMemcpyHostToDevice);
+	cudaMalloc((void**) &cuda_pixel_in, sizeof(uint32_t) * width * height);
+	cudaMalloc((void**) &cuda_pixel_out, sizeof(uint32_t) * width * height);
+	cudaMemcpy(cuda_pixel_in, pixel_in, sizeof(uint32_t) * width * height, cudaMemcpyHostToDevice);
 
-	/*dim3 grid_size = dim3((height / BLOCK_DIM) + 1, (width / BLOCK_DIM) + 1, 1);
-	dim3 block_size = dim3(BLOCK_DIM, BLOCK_DIM, 1);*/
 
 	dim3 threads_per_block(width, height);
 	dim3 blocks_per_grid(1, 1);
@@ -387,7 +312,7 @@ __host__ int main(void) {
 	cudaEventRecord(syncEvent, 0);
 	cudaEventSynchronize(syncEvent);
 
-	cudaMemcpy(pixel_out, cuda_pixel_out, sizeof(Pixel) * width * height, cudaMemcpyDeviceToHost);
+	cudaMemcpy(pixel_out, cuda_pixel_out, sizeof(uint32_t) * width * height, cudaMemcpyDeviceToHost);
 
 	cudaEventDestroy(syncEvent);
 
