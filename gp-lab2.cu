@@ -62,10 +62,10 @@ __device__ int32_t GetLinearizedPosition(Position pos, uint32_t height, uint32_t
 	return (IsCorrectPos(pos, height, width)) ? (pos.Y * (int32_t) width + pos.X) : -1;
 }
 
-__device__ uint8_t GetMedianElementFromCountArray(uint32_t *arr, uint32_t size) {
-	uint32_t tmp_cnt = 0;
+__device__ uint8_t GetMedianElementFromCountArray(uint16_t *arr, uint16_t size) {
+	uint16_t tmp_cnt = 0;
 	uint8_t res = 0;
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
+	for (uint16_t i = 0; i < COUNTING_SORT_BASE; i++) {
 		tmp_cnt += arr[i];
 		if (tmp_cnt > size / 2) {
 			res = (uint8_t) i;
@@ -87,10 +87,10 @@ __device__ uint8_t GetPixelElement(uint32_t pixel, uint32_t element) {
 
 __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 		Position start, Position end) {
-	uint32_t count_array_red[COUNTING_SORT_BASE];
-	uint32_t count_array_green[COUNTING_SORT_BASE];
-	uint32_t count_array_blue[COUNTING_SORT_BASE];
-	for (uint32_t i = 0; i < COUNTING_SORT_BASE; i++) {
+	uint16_t count_array_red[COUNTING_SORT_BASE];
+	uint16_t count_array_green[COUNTING_SORT_BASE];
+	uint16_t count_array_blue[COUNTING_SORT_BASE];
+	for (uint16_t i = 0; i < (uint16_t) COUNTING_SORT_BASE; i++) {
 		count_array_red[i] = 0;
 		count_array_green[i] = 0;
 		count_array_blue[i] = 0;
@@ -98,7 +98,7 @@ __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 
 	Position curr_pos;
 
-	uint32_t size = 0;
+	uint16_t size = 0;
 	//cuPrintf("\nStart: [%d:%d]\nEnd: [%d:%d]\n\n", start.X, start.Y, end.X, end.Y);
 
 	for (curr_pos.X = start.X; curr_pos.X <= end.X; curr_pos.X++) {
@@ -108,28 +108,16 @@ __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 				continue;
 			}
 			//cuPrintf(" [%d:%d] - CORRECT\n", curr_pos.X, curr_pos.Y);
-			//uint32_t pos_linear = GetLinearizedPosition(curr_pos, height, width);
-			uint32_t curr = tex2D(OriginalImage, curr_pos.X, curr_pos.Y);
-			/*count_array_red[
-				GetPixelElement(
-					map_in[pos_linear], Pixel::RED)]++;
-			count_array_green[
-				GetPixelElement(
-					map_in[pos_linear], Pixel::GREEN)]++;
-			count_array_blue[
-				GetPixelElement(
-					map_in[pos_linear], Pixel::BLUE)]++;*/
+			//uint32_t curr = tex2D(OriginalImage, curr_pos.X, curr_pos.Y);
 			count_array_red[
 				GetPixelElement(
-					curr, Pixel::RED)]++;
+					tex2D(OriginalImage, curr_pos.X, curr_pos.Y), Pixel::RED)]++;
 			count_array_green[
 				GetPixelElement(
-					curr, Pixel::GREEN)]++;
+					tex2D(OriginalImage, curr_pos.X, curr_pos.Y), Pixel::GREEN)]++;
 			count_array_blue[
 				GetPixelElement(
-					curr, Pixel::BLUE)]++;
-			/*count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
-			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;*/
+					tex2D(OriginalImage, curr_pos.X, curr_pos.Y), Pixel::BLUE)]++;
 
 			size++;
 		}
@@ -138,11 +126,11 @@ __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 	//cuPrintf(" %d-%d-%d-%d-%d\n", count_array_red[0], count_array_red[1], count_array_red[2], count_array_red[3], count_array_red[4]);
 
 	
-	uint32_t res = MakePixel(GetMedianElementFromCountArray(count_array_red, size),
+	return MakePixel(GetMedianElementFromCountArray(count_array_red, size),
 		GetMedianElementFromCountArray(count_array_green, size),
 		GetMedianElementFromCountArray(count_array_blue, size), 0);
 	//cuPrintf("\n%d-%d-%d-%d\n", (int32_t) res.Red, (int32_t) res.Green, (int32_t) res.Blue, (int32_t) res.Alpha);
-	return res;
+	//return res;
 }
 
 __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint32_t width,
@@ -154,8 +142,8 @@ __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint
 	end.Y = min(pos.Y + (int32_t) radius, height - 1);
 
 
-	int32_t pos_linear = GetLinearizedPosition(pos, height, width);
-	map_out[pos_linear] = GetMedianValue(height, width, start, end);
+	//int32_t pos_linear = GetLinearizedPosition(pos, height, width);
+	map_out[GetLinearizedPosition(pos, height, width)] = GetMedianValue(height, width, start, end);
 }
 
 /*
@@ -279,7 +267,7 @@ __host__ void FileGeneratorBig(uint32_t height, uint32_t width, string filename)
 }
 
 __host__ int main(void) {
-	FileGeneratorBig(100, 100, "inbig.data");
+	//FileGeneratorBig(100, 100, "inbig.data");
 	string file_in, file_out;
 	uint32_t radius;
 
@@ -301,7 +289,7 @@ __host__ int main(void) {
 
 	cudaArray *cuda_pixel_in;
 	cudaChannelFormatDesc ch = cudaCreateChannelDesc<uint32_t>();
-	cudaMallocArray(&cuda_pixel_in, &ch, height, width);
+	cudaMallocArray(&cuda_pixel_in, &ch, width, height);
 	cudaMemcpyToArray(cuda_pixel_in, 0, 0, pixel_in, sizeof(uint32_t) * height * width, cudaMemcpyHostToDevice);
 	//cudaMalloc((void**) &cuda_pixel_in, sizeof(uint32_t) * width * height);
 	cudaMalloc((void**) &cuda_pixel_out, sizeof(uint32_t) * width * height);
