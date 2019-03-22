@@ -32,12 +32,6 @@ STRUCTURES
 ==========
 */
 
-/*struct Pixel {
-	uint8_t Red;
-	uint8_t Green;
-	uint8_t Blue;
-	uint8_t Alpha;
-};*/
 
 struct Position {
 	int32_t X;
@@ -99,7 +93,6 @@ __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 	Position curr_pos;
 
 	uint16_t size = 0;
-	//cuPrintf("\nStart: [%d:%d]\nEnd: [%d:%d]\n\n", start.X, start.Y, end.X, end.Y);
 
 	for (curr_pos.X = start.X; curr_pos.X <= end.X; curr_pos.X++) {
 		for (curr_pos.Y = start.Y; curr_pos.Y <= end.Y; curr_pos.Y++) {
@@ -122,15 +115,10 @@ __device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 			size++;
 		}
 	}
-
-	//cuPrintf(" %d-%d-%d-%d-%d\n", count_array_red[0], count_array_red[1], count_array_red[2], count_array_red[3], count_array_red[4]);
-
 	
 	return MakePixel(GetMedianElementFromCountArray(count_array_red, size),
 		GetMedianElementFromCountArray(count_array_green, size),
 		GetMedianElementFromCountArray(count_array_blue, size), 0);
-	//cuPrintf("\n%d-%d-%d-%d\n", (int32_t) res.Red, (int32_t) res.Green, (int32_t) res.Blue, (int32_t) res.Alpha);
-	//return res;
 }
 
 __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint32_t width,
@@ -141,8 +129,6 @@ __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint
 	end.X = min(pos.X + (int32_t) radius, width - 1);
 	end.Y = min(pos.Y + (int32_t) radius, height - 1);
 
-
-	//int32_t pos_linear = GetLinearizedPosition(pos, height, width);
 	map_out[GetLinearizedPosition(pos, height, width)] = GetMedianValue(height, width, start, end);
 }
 
@@ -162,7 +148,6 @@ __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
 	offset.X = gridDim.x * blockDim.x;
 	offset.Y = gridDim.y * blockDim.y;
 
-	//cuPrintf("\n%d:%d\n%d:%d\n======\n", pos.X, pos.Y, height, width);
 	Position pos;
 	for (pos.X = start.X; pos.X < width; pos.X += offset.X) {
 		for (pos.Y = start.Y; pos.Y < height; pos.Y += offset.Y) {
@@ -172,7 +157,6 @@ __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
 			}
 		}
 	}
-	//cuPrintf("Hello world from CUDA\n");
 }
 
 /*
@@ -199,8 +183,6 @@ __host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *wi
 		string filename) {
 	FILE *file = fopen(filename.c_str(), "rb");
 	uint32_t sizes[2];
-	/*fread(width, sizeof(uint32_t), 1, file);
-	fread(height, sizeof(uint32_t), 1, file);*/
 	fread(sizes, sizeof(uint32_t), 2, file);
 	*width = sizes[0];
 	*height = sizes[1];
@@ -215,8 +197,6 @@ __host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *wi
 __host__ void WriteImageToFile(uint32_t *pixel, uint32_t height, uint32_t width, string filename) {
 	FILE *file = fopen(filename.c_str(), "wb");
 	uint32_t sizes[2] = {width, height};
-	/*fwrite(&width, sizeof(uint32_t), 1, file);
-	fwrite(&height, sizeof(uint32_t), 1, file);*/
 	fwrite(sizes, sizeof(uint32_t), 2, file);
 
 	uint32_t size = height * width;
@@ -280,20 +260,13 @@ __host__ int main(void) {
 
 	InitPixelMap(&pixel_out, height, width);
 
-	//uint32_t *cuda_pixel_in;
 	uint32_t *cuda_pixel_out;
-
-	/*size_t pitch;
-	cudaMallocPitch((void**) &cuda_pixel_in, &pitch, width * sizeof(Pixel), height);
-	cudaMallocPitch((void**) &cuda_pixel_out, &pitch, width * sizeof(Pixel), height);*/
 
 	cudaArray *cuda_pixel_in;
 	cudaChannelFormatDesc ch = cudaCreateChannelDesc<uint32_t>();
 	cudaMallocArray(&cuda_pixel_in, &ch, width, height);
 	cudaMemcpyToArray(cuda_pixel_in, 0, 0, pixel_in, sizeof(uint32_t) * height * width, cudaMemcpyHostToDevice);
-	//cudaMalloc((void**) &cuda_pixel_in, sizeof(uint32_t) * width * height);
 	cudaMalloc((void**) &cuda_pixel_out, sizeof(uint32_t) * width * height);
-	//cudaMemcpy(cuda_pixel_in, pixel_in, sizeof(uint32_t) * width * height, cudaMemcpyHostToDevice);
 	
 	OriginalImage.addressMode[0] = cudaAddressModeClamp;
 	OriginalImage.addressMode[1] = cudaAddressModeClamp;
@@ -314,20 +287,9 @@ __host__ int main(void) {
 		blocks_per_grid.y = ceil((double) (height) / (double)(threads_per_block.y));
 	}
 
-	//cout << threads_per_block.x << " " << threads_per_block.y << endl;
-	//cout << blocks_per_grid.x << " " << blocks_per_grid.y << endl;
-
 	//cudaPrintfInit();
 	MedianFilter<<<blocks_per_grid, threads_per_block>>>(radius, height, width,
 		cuda_pixel_out);
-
-	//cout << cudaGetErrorString(cudaGetLastError()) << endl;
-
-
-	//cudaPrintfDisplay(stdout, true);
-    //cudaPrintfEnd();
-
-
 
 	cudaEvent_t syncEvent;
 
@@ -339,7 +301,6 @@ __host__ int main(void) {
 
 	cudaEventDestroy(syncEvent);
 
-	//cudaFree(cuda_pixel_in);
 	cudaUnbindTexture(OriginalImage);
 	cudaFreeArray(cuda_pixel_in);
 	cudaFree(cuda_pixel_out);
