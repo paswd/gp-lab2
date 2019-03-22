@@ -53,17 +53,11 @@ DEVICE
 }*/
 
 __device__ bool IsCorrectPos(Position pos, uint32_t height, uint32_t width) {
-	if (pos.X >= 0 && pos.Y >= 0 && pos.X < (int32_t) width && pos.Y < (int32_t) height) {
-		return true;
-	}
-	return false;
+	return (pos.X >= 0 && pos.Y >= 0 && pos.X < (int32_t) width && pos.Y < (int32_t) height);
 }
 
 __device__ int32_t GetLinearizedPosition(Position pos, uint32_t height, uint32_t width) {
-	if (!IsCorrectPos(pos, height, width)) {
-		return -1;
-	}
-	return pos.Y * width + pos.X;
+	return (IsCorrectPos(pos, height, width)) ? (pos.Y * (int32_t) width + pos.X) : -1;
 }
 
 __device__ uint8_t GetMedianElementFromCountArray(uint32_t *arr, uint32_t size) {
@@ -86,10 +80,11 @@ __device__ uint32_t MakePixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t 
 }
 
 __device__ uint8_t GetPixelElement(uint32_t pixel, uint32_t element) {
-	return (pixel >> element) & 255;
+	return (uint8_t) (pixel >> element) & 255;
 }
 
-__device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t width, Position start, Position end) {
+__device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t width,
+		Position start, Position end) {
 	uint32_t count_array_red[COUNTING_SORT_BASE];
 	uint32_t count_array_green[COUNTING_SORT_BASE];
 	uint32_t count_array_blue[COUNTING_SORT_BASE];
@@ -111,9 +106,16 @@ __device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t w
 				continue;
 			}
 			//cuPrintf(" [%d:%d] - CORRECT\n", curr_pos.X, curr_pos.Y);
-			count_array_red[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::RED)]++;
-			count_array_green[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::GREEN)]++;
-			count_array_blue[GetPixelElement(map_in[GetLinearizedPosition(curr_pos, height, width)], Pixel::BLUE)]++;
+			uint32_t pos_linear = GetLinearizedPosition(curr_pos, height, width);
+			count_array_red[
+				GetPixelElement(
+					map_in[pos_linear], Pixel::RED)]++;
+			count_array_green[
+				GetPixelElement(
+					map_in[pos_linear], Pixel::GREEN)]++;
+			count_array_blue[
+				GetPixelElement(
+					map_in[pos_linear], Pixel::BLUE)]++;
 			/*count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
 			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;*/
 
@@ -193,10 +195,15 @@ __host__ void DestroyPixelMap(uint32_t **pixel) {
 	*pixel = NULL;
 }	
 
-__host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *width, string filename) {
+__host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *width,
+		string filename) {
 	FILE *file = fopen(filename.c_str(), "rb");
-	fread(width, sizeof(uint32_t), 1, file);
-	fread(height, sizeof(uint32_t), 1, file);
+	uint32_t sizes[2];
+	/*fread(width, sizeof(uint32_t), 1, file);
+	fread(height, sizeof(uint32_t), 1, file);*/
+	fread(sizes, sizeof(uint32_t), 2, file);
+	*width = sizes[0];
+	*height = sizes[1];
 
 	uint32_t size = (*height) * (*width);
 
@@ -207,8 +214,10 @@ __host__ void ReadImageFromFile(uint32_t **pixel, uint32_t *height, uint32_t *wi
 
 __host__ void WriteImageToFile(uint32_t *pixel, uint32_t height, uint32_t width, string filename) {
 	FILE *file = fopen(filename.c_str(), "wb");
-	fwrite(&width, sizeof(uint32_t), 1, file);
-	fwrite(&height, sizeof(uint32_t), 1, file);
+	uint32_t sizes[2] = {width, height};
+	/*fwrite(&width, sizeof(uint32_t), 1, file);
+	fwrite(&height, sizeof(uint32_t), 1, file);*/
+	fwrite(sizes, sizeof(uint32_t), 2, file);
 
 	uint32_t size = height * width;
 	fwrite(pixel, sizeof(uint32_t), size, file);
@@ -296,7 +305,8 @@ __host__ int main(void) {
 	//cout << blocks_per_grid.x << " " << blocks_per_grid.y << endl;
 
 	//cudaPrintfInit();
-	MedianFilter<<<blocks_per_grid, threads_per_block>>>(radius, height, width, cuda_pixel_in, cuda_pixel_out);
+	MedianFilter<<<blocks_per_grid, threads_per_block>>>(radius, height, width,
+		cuda_pixel_in, cuda_pixel_out);
 
 	//cout << cudaGetErrorString(cudaGetLastError()) << endl;
 
@@ -319,7 +329,7 @@ __host__ int main(void) {
 	cudaFree(cuda_pixel_in);
 	cudaFree(cuda_pixel_out);
 
-	WriteImageToFile(pixel_out, height, width, file_out.c_str());
+	WriteImageToFile(pixel_out, height, width, file_out);
 
 	DestroyPixelMap(&pixel_in);
 	DestroyPixelMap(&pixel_out);
