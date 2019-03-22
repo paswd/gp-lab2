@@ -24,6 +24,8 @@ namespace Pixel {
 	const uint32_t ALPHA = 8 * 3;
 }
 
+texture<uint32_t, 2, cudaReadModeElementType> OriginalImage;
+
 /*
 ==========
 STRUCTURES
@@ -83,7 +85,7 @@ __device__ uint8_t GetPixelElement(uint32_t pixel, uint32_t element) {
 	return (uint8_t) (pixel >> element) & 255;
 }
 
-__device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t width,
+__device__ uint32_t GetMedianValue(uint32_t height, uint32_t width,
 		Position start, Position end) {
 	uint32_t count_array_red[COUNTING_SORT_BASE];
 	uint32_t count_array_green[COUNTING_SORT_BASE];
@@ -106,8 +108,9 @@ __device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t w
 				continue;
 			}
 			//cuPrintf(" [%d:%d] - CORRECT\n", curr_pos.X, curr_pos.Y);
-			uint32_t pos_linear = GetLinearizedPosition(curr_pos, height, width);
-			count_array_red[
+			//uint32_t pos_linear = GetLinearizedPosition(curr_pos, height, width);
+			uint32_t curr = tex2D(OriginalImage, curr_pos.X, curr_pos.Y);
+			/*count_array_red[
 				GetPixelElement(
 					map_in[pos_linear], Pixel::RED)]++;
 			count_array_green[
@@ -115,7 +118,16 @@ __device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t w
 					map_in[pos_linear], Pixel::GREEN)]++;
 			count_array_blue[
 				GetPixelElement(
-					map_in[pos_linear], Pixel::BLUE)]++;
+					map_in[pos_linear], Pixel::BLUE)]++;*/
+			count_array_red[
+				GetPixelElement(
+					curr, Pixel::RED)]++;
+			count_array_green[
+				GetPixelElement(
+					curr, Pixel::GREEN)]++;
+			count_array_blue[
+				GetPixelElement(
+					curr, Pixel::BLUE)]++;
 			/*count_array_green[map_in[GetLinearizedPosition(curr_pos, height, width)].Green]++;
 			count_array_blue[map_in[GetLinearizedPosition(curr_pos, height, width)].Blue]++;*/
 
@@ -134,7 +146,7 @@ __device__ uint32_t GetMedianValue(uint32_t *map_in, uint32_t height, uint32_t w
 }
 
 __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint32_t width,
-		uint32_t *map_in, uint32_t *map_out) {
+		uint32_t *map_out) {
 	Position start, end;
 	start.X = max(pos.X - (int32_t) radius, 0);
 	start.Y = max(pos.Y - (int32_t) radius, 0);
@@ -143,7 +155,7 @@ __device__ void GetNewPixel(Position pos, uint32_t radius, uint32_t height, uint
 
 
 	int32_t pos_linear = GetLinearizedPosition(pos, height, width);
-	map_out[pos_linear] = GetMedianValue(map_in, height, width, start, end);
+	map_out[pos_linear] = GetMedianValue(height, width, start, end);
 }
 
 /*
@@ -153,7 +165,7 @@ GLOBAL
 */
 
 __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
-		uint32_t *map_in, uint32_t *map_out) {
+		uint32_t *map_out) {
 
 	Position start, offset;
 	start.X = blockIdx.x * blockDim.x + threadIdx.x;
@@ -168,7 +180,7 @@ __global__ void MedianFilter(uint32_t radius, uint32_t height, uint32_t width,
 		for (pos.Y = start.Y; pos.Y < height; pos.Y += offset.Y) {
 			if (pos.X < width && pos.Y < height) {
 				//cuPrintf("\n%d:%d\n", pos.X, pos.Y);
-				GetNewPixel(pos, radius, height, width, map_in, map_out);
+				GetNewPixel(pos, radius, height, width, map_out);
 			}
 		}
 	}
@@ -267,7 +279,7 @@ __host__ void FileGeneratorBig(uint32_t height, uint32_t width, string filename)
 }
 
 __host__ int main(void) {
-	//FileGeneratorBig(5, 3, "inbig.data");
+	FileGeneratorBig(100, 100, "inbig.data");
 	string file_in, file_out;
 	uint32_t radius;
 
@@ -280,15 +292,28 @@ __host__ int main(void) {
 
 	InitPixelMap(&pixel_out, height, width);
 
-	uint32_t *cuda_pixel_in;
+	//uint32_t *cuda_pixel_in;
 	uint32_t *cuda_pixel_out;
 
 	/*size_t pitch;
 	cudaMallocPitch((void**) &cuda_pixel_in, &pitch, width * sizeof(Pixel), height);
 	cudaMallocPitch((void**) &cuda_pixel_out, &pitch, width * sizeof(Pixel), height);*/
-	cudaMalloc((void**) &cuda_pixel_in, sizeof(uint32_t) * width * height);
+
+	cudaArray *cuda_pixel_in;
+	cudaChannelFormatDesc ch = cudaCreateChannelDesc<uint32_t>();
+	cudaMallocArray(&cuda_pixel_in, &ch, height, width);
+	cudaMemcpyToArray(cuda_pixel_in, 0, 0, pixel_in, sizeof(uint32_t) * height * width, cudaMemcpyHostToDevice);
+	//cudaMalloc((void**) &cuda_pixel_in, sizeof(uint32_t) * width * height);
 	cudaMalloc((void**) &cuda_pixel_out, sizeof(uint32_t) * width * height);
-	cudaMemcpy(cuda_pixel_in, pixel_in, sizeof(uint32_t) * width * height, cudaMemcpyHostToDevice);
+	//cudaMemcpy(cuda_pixel_in, pixel_in, sizeof(uint32_t) * width * height, cudaMemcpyHostToDevice);
+	
+	OriginalImage.addressMode[0] = cudaAddressModeClamp;
+	OriginalImage.addressMode[1] = cudaAddressModeClamp;
+
+	OriginalImage.channelDesc = ch;
+	OriginalImage.filterMode = cudaFilterModePoint;
+	OriginalImage.normalized = false;
+	cudaBindTextureToArray(OriginalImage, cuda_pixel_in, ch);
 
 
 	dim3 threads_per_block(width, height);
@@ -306,7 +331,7 @@ __host__ int main(void) {
 
 	//cudaPrintfInit();
 	MedianFilter<<<blocks_per_grid, threads_per_block>>>(radius, height, width,
-		cuda_pixel_in, cuda_pixel_out);
+		cuda_pixel_out);
 
 	//cout << cudaGetErrorString(cudaGetLastError()) << endl;
 
@@ -326,7 +351,9 @@ __host__ int main(void) {
 
 	cudaEventDestroy(syncEvent);
 
-	cudaFree(cuda_pixel_in);
+	//cudaFree(cuda_pixel_in);
+	cudaUnbindTexture(OriginalImage);
+	cudaFreeArray(cuda_pixel_in);
 	cudaFree(cuda_pixel_out);
 
 	WriteImageToFile(pixel_out, height, width, file_out);
